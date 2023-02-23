@@ -1,4 +1,5 @@
 # tap-rest-api-msdk
+![singer_rest_api_tap](https://user-images.githubusercontent.com/84364906/220881634-c0d0145a-ab85-44e9-91b6-e8d365da25f3.png)
 
 `tap-rest-api-msdk` is a Singer tap for generic rest-apis. The novelty of this particular tap
 is that it will auto-discover the stream's schema.
