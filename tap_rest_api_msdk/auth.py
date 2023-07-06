@@ -1,9 +1,11 @@
 """REST authentication handling."""
+from __future__ import annotations
 
 import os
 from typing import Any
 
 import boto3
+import requests
 from requests_aws4auth import AWS4Auth
 from singer_sdk.authenticators import (
     APIKeyAuthenticator,
@@ -11,6 +13,7 @@ from singer_sdk.authenticators import (
     BearerTokenAuthenticator,
     OAuthAuthenticator
 )
+from singer_sdk.helpers._util import utc_now
 
 
 class AWSConnectClient:
