@@ -5,7 +5,13 @@ from typing import Any
 
 import boto3
 from requests_aws4auth import AWS4Auth
-from singer_sdk.authenticators import APIKeyAuthenticator, BasicAuthenticator, BearerTokenAuthenticator, OAuthAuthenticator
+from singer_sdk.authenticators import (
+    APIKeyAuthenticator,
+    BasicAuthenticator,
+    BearerTokenAuthenticator,
+    OAuthAuthenticator
+)
+
 
 class AWSConnectClient:
     """A connection class to AWS Resources"""
@@ -104,6 +110,27 @@ class AWSConnectClient:
 
 class ConfigurableOAuthAuthenticator(OAuthAuthenticator):
 
+    def __init__(
+        self,
+        *args,
+        auth_headers: dict | None = None,
+        **kwargs
+    ) -> None:
+        """Create a new OAUTH authenticator.
+
+        If auth_headers is provided, it will be merged with http_headers specified on
+        the stream.
+
+        Args:
+            stream: The stream instance to use with this authenticator.
+            auth_headers: Authentication headers.
+        """
+        super().__init__(*args, **kwargs)
+        if self._auth_headers is None:
+            self._auth_headers = {}
+        if auth_headers:
+            self._auth_headers.update(auth_headers)
+
     @property
     def oauth_request_body(self) -> dict:
         """Build up a list of OAuth2 parameters to use depending
@@ -170,6 +197,41 @@ class ConfigurableOAuthAuthenticator(OAuthAuthenticator):
 
         return oauth_params
 
+    # Authentication and refresh      
+    def update_access_token(self) -> None:
+        """Update `access_token` along with: `last_refreshed` and `expires_in`.
+
+        Raises:
+            RuntimeError: When OAuth login fails.
+        """
+        request_time = utc_now()
+        auth_request_payload = self.oauth_request_payload
+        token_response = requests.post(
+            self.auth_endpoint,
+            headers=self._auth_headers,  # Added support for headers to be passed in
+            data=auth_request_payload,
+            timeout=60,
+        )
+        try:
+            token_response.raise_for_status()
+        except requests.HTTPError as ex:
+            raise RuntimeError(
+                f"Failed OAuth login, response was '{token_response.json()}'. {ex}",
+            ) from ex
+
+        self.logger.info("OAuth authorization attempt was successful.")
+
+        token_json = token_response.json()
+        self.access_token = token_json["access_token"]
+        self.expires_in = int(token_json.get("expires_in", self._default_expiration))   # Need to set the token as int if it is returned as a string.
+        if self.expires_in is None:
+            self.logger.debug(
+                "No expires_in receied in OAuth response and no "
+                "default_expiration set. Token will be treated as if it never "
+                "expires.",
+            )
+        self.last_refreshed = request_time
+
 
 def select_authenticator(self) -> Any:
     """Calls an appropriate SDK Authentication method based on the the set auth_method.
@@ -194,6 +256,11 @@ def select_authenticator(self) -> Any:
     auth_method = my_config.get('auth_method', "")
     api_keys = my_config.get('api_keys', '')
     self.http_auth = None
+    
+    # Set http headers if headers are supplied
+    # Some OAUTH2 API's require headers to be supplied
+    # In the OAUTH request.
+    auth_headers = my_config.get('headers',None)
 
     # Using API Key Authenticator, keys are extracted from api_keys dict
     if auth_method == "api_key":
@@ -220,6 +287,7 @@ def select_authenticator(self) -> Any:
             auth_endpoint=my_config.get('access_token_url', ''),
             oauth_scopes=my_config.get('scope', ''),
             default_expiration=my_config.get('oauth_expiration_secs', ''),
+            auth_headers=auth_headers
         )
     # Using Bearer Token Authenticator
     elif auth_method == "bearer_token":
